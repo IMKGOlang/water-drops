@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Поверхность воды — симуляция</title>
+<style>
+  :root {
+    --panel-bg: #101820;
+    --panel-fg: #cfe3ee;
+    --accent: #2f9ec7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #06090c; }
+  body {
+    display: flex;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: var(--panel-fg);
+  }
+  #stage {
+    position: relative;
+    flex: 1 1 auto;
+    height: 100%;
+    overflow: hidden;
+  }
+  #water {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  #panel {
+    flex: 0 0 270px;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--panel-bg);
+    border-left: 1px solid #1f2e3a;
+    padding: 18px 16px 24px;
+    user-select: none;
+  }
+  #panel h1 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: .4px;
+    margin-bottom: 4px;
+  }
+  #panel .sub {
+    font-size: 11.5px;
+    color: #7b93a3;
+    margin-bottom: 16px;
+    line-height: 1.45;
+  }
+  .group {
+    margin-bottom: 18px;
+    padding: 12px;
+    background: #16222c;
+    border: 1px solid #1f2e3a;
+    border-radius: 10px;
+  }
+  .group h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: #8fb3c7;
+    margin-bottom: 10px;
+  }
+  .modes { display: flex; gap: 8px; }
+  .modes button {
+    flex: 1;
+    padding: 9px 4px;
+    font-size: 13px;
+    border: 1px solid #2a3d4c;
+    border-radius: 8px;
+    background: #0d141b;
+    color: var(--panel-fg);
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .modes button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .row label { font-size: 13px; flex: 1; }
+  .row output { font-size: 12.5px; color: #9fc3d6; min-width: 56px; text-align: right; }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  input[type="color"] {
+    width: 46px; height: 34px;
+    border: none; border-radius: 6px;
+    background: none; cursor: pointer;
+  }
+  .swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .swatches button {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.18);
+    cursor: pointer;
+    transition: transform .1s;
+  }
+  .swatches button:hover { transform: scale(1.18); }
+  .bigbtn {
+    width: 100%;
+    padding: 10px;
+    margin-top: 4px;
+    font-size: 13.5px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: #fff;
+    background: var(--accent);
+    transition: filter .15s;
+  }
+  .bigbtn:hover { filter: brightness(1.15); }
+  .bigbtn.ghost {
+    background: #233442;
+    font-weight: 500;
+  }
+  .hint {
+    font-size: 11px;
+    color: #66808f;
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+  /* падающая капля */
+  .falling-drop {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    box-shadow: inset -3px -5px 8px rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.35);
+    z-index: 5;
+  }
+  #nogl {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    color: #e8a0a0; font-size: 15px; text-align: center; padding: 30px;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="water"></canvas>
+    <div id="nogl">Ваш браузер не поддерживает WebGL — симуляция воды недоступна.</div>
+  </div>
+
+  <aside id="panel">
+    <h1>Поверхность воды</h1>
+    <div class="sub">Вид сверху. Жидкость решается уравнениями Навье–Стокса, краситель растекается за счёт адвекции и диффузии — как в реальной воде.</div>
+
+    <div class="group">
+      <h2>Режим курсора</h2>
+      <div class="modes">
+        <button id="modeTouch" class="active" title="Клик — прикосновение твёрдым телом">👆 Касание</button>
+        <button id="modeDrop" title="Клик — сбросить каплю в эту точку">💧 Капля</button>
+      </div>
+      <div class="hint" id="modeHint">Нажмите или проведите по воде — поверхность отреагирует волнами и течением.</div>
+    </div>
+
+    <div class="group">
+      <h2>Капля</h2>
+      <div class="row">
+        <label for="dropColor">Цвет капли</label>
+        <input type="color" id="dropColor" value="#d4143c">
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <div class="row" style="margin-top:14px">
+        <label for="dropVolume">Объём</label>
+        <output id="volumeOut">25 мл</output>
+      </div>
+      <input type="range" id="dropVolume" min="1" max="150" step="1" value="25">
+      <button class="bigbtn" id="dropRandom" style="margin-top:14px">💧 Сбросить каплю</button>
+      <div class="hint">Кнопка бросает каплю в случайное место. В режиме «Капля» кликните по воде, чтобы выбрать точку падения.</div>
+    </div>
+
+    <div class="group">
+      <h2>Свойства воды</h2>
+      <div class="row">
+        <label for="viscosity">Вязкость</label>
+        <output id="viscosityOut">10</output>
+      </div>
+      <input type="range" id="viscosity" min="0" max="100" step="1" value="10">
+      <div class="row" style="margin-top:10px">
+        <label for="diffusion">Диффузия красителя</label>
+        <output id="diffusionOut">25</output>
+      </div>
+      <input type="range" id="diffusion" min="0" max="100" step="1" value="12">
+    </div>
+
+    <button class="bigbtn ghost" id="clearBtn">🧹 Очистить воду</button>
+  </aside>
+
+<script>
+'use strict';
+
+/* ============================================================
+   Симуляция воды (вид сверху)
+   - Поле скоростей: несжимаемые уравнения Навье–Стокса
+     (полулагранжева адвекция, вихревая добавка, проекция
+     давления методом Якоби) — схема "Stable Fluids" Дж. Стэма.
+   - Краситель: переносится полем скоростей (адвекция) и
+     расплывается явной диффузией; хранится как оптическая
+     плотность (поглощение света), поэтому цвета смешиваются
+     субтрактивно — как настоящие чернила в воде.
+   - Рябь от касаний: отдельное волновое уравнение по высоте
+     поверхности; градиент высоты даёт преломление и блики.
+   ============================================================ */
+
+const canvas = document.getElementById('water');
+const stage = document.getElementById('stage');
+
+const config = {
+  SIM_RESOLUTION: 192,     // сетка скоростей
+  DYE_RESOLUTION: 768,     // сетка красителя
+  WAVE_RESOLUTION: 384,    // сетка высоты поверхности
+  PRESSURE_ITERATIONS: 24,
+  PRESSURE: 0.8,
+  CURL: 12,                // вихревая добавка
+  VELOCITY_DISSIPATION: 0.45, // управляется ползунком «Вязкость»
+  DYE_DIFFUSION: 0.05,        // управляется ползунком «Диффузия»
+  WAVE_DAMPING: 0.996,
+  TOUCH_FORCE: 220,        // радиальный толчок от касания
+  DRAG_FORCE: 5500,        // сила при ведении курсором
+  ABSORB_SCALE: 2.6,       // оптическая плотность при отрисовке
+};
+
+const state = {
+  mode: 'touch',           // 'touch' | 'drop'
+  dropColor: hexToRgb('#d4143c'),
+  dropVolume: 25,
+};
+
+/* ---------- Контекст WebGL ---------- */
+
+function getWebGLContext (canvas) {
+  const params = { alpha: false, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
+  let gl = canvas.getContext('webgl2', params);
+  const isWebGL2 = !!gl;
+  if (!isWebGL2)
+    gl = canvas.getContext('webgl', params) || canvas.getContext('experimental-webgl', params);
+  if (!gl) return null;
+
+  let halfFloat;
+  let supportLinearFiltering;
+  if (isWebGL2) {
+    gl.getExtension('EXT_color_buffer_float');
+    supportLinearFiltering = gl.getExtension('OES_texture_float_linear');
+  } else {
+    halfFloat = gl.getExtension('OES_texture_half_float');
+    supportLinearFiltering = gl.getExtension('OES_texture_half_float_linear');
+  }
+  gl.clearColor(0, 0, 0, 1);
+
+  const halfFloatTexType = isWebGL2 ? gl.HALF_FLOAT : (halfFloat && halfFloat.HALF_FLOAT_OES);
+  let formatRGBA, formatRG, formatR;
+  if (isWebGL2) {
+    formatRGBA = getSupportedFormat(gl, gl.RGBA16F, gl.RGBA, halfFloatTexType);
+    formatRG   = getSupportedFormat(gl, gl.RG16F,   gl.RG,   halfFloatTexType);
+    formatR    = getSupportedFormat(gl, gl.R16F,    gl.RED,  halfFloatTexType);
+  } else {
+    formatRGBA = getSupportedFormat(gl, gl.RGBA, gl.RGBA, halfFloatTexType);
+    formatRG   = formatRGBA;
+    formatR    = formatRGBA;
+  }
+  if (!formatRGBA) return null;
+
+  return { gl, ext: { formatRGBA, formatRG, formatR, halfFloatTexType, supportLinearFiltering: !!supportLinearFiltering } };
+}
+
+function getSupportedFormat (gl, internalFormat, format, type) {
+  if (!supportRenderTextureFormat(gl, internalFormat, format, type)) {
+    switch (internalFormat) {
+      case gl.R16F:  return getSupportedFormat(gl, gl.RG16F, gl.RG, type);
+      case gl.RG16F: return getSupportedFormat(gl, gl.RGBA16F, gl.RGBA, type);
+      default: return null;
+    }
+  }
+  return { internalFormat, format };
+}
+
+function supportRenderTextureFormat (gl, internalFormat, format, type) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 4, 4, 0, format, type, null);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  return gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+}
+
+const ctx = getWebGLContext(canvas);
+if (!ctx) {
+  document.getElementById('nogl').style.display = 'flex';
+  throw new Error('WebGL unavailable');
+}
+const gl = ctx.gl;
+const ext = ctx.ext;
+
+/* ---------- Шейдеры ---------- */
+
+function compileShader (type, source, keywords) {
+  if (keywords) {
+    let kw = '';
+    keywords.forEach(k => kw += '#define ' + k + '\n');
+    source = kw + source;
+  }
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+    console.error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+function createProgram (vs, fs) {
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+    console.error(gl.getProgramInfoLog(program));
+  const uniforms = {};
+  const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < count; i++) {
+    const name = gl.getActiveUniform(program, i).name;
+    uniforms[name] = gl.getUniformLocation(program, name);
+  }
+  return { program, uniforms, bind () { gl.useProgram(this.program); } };
+}
+
+const baseVertexShader = compileShader(gl.VERTEX_SHADER, `
+  precision highp float;
+  attribute vec2 aPosition;
+  varying vec2 vUv;
+  varying vec2 vL;
+  varying vec2 vR;
+  varying vec2 vT;
+  varying vec2 vB;
+  uniform vec2 texelSize;
+  void main () {
+    vUv = aPosition * 0.5 + 0.5;
+    vL = vUv - vec2(texelSize.x, 0.0);
+    vR = vUv + vec2(texelSize.x, 0.0);
+    vT = vUv + vec2(0.0, texelSize.y);
+    vB = vUv - vec2(0.0, texelSize.y);
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+  }
+`);
+
+const copyShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  uniform sampler2D uTexture;
+  void main () { gl_FragColor = texture2D(uTexture, vUv); }
+`);
+
+const clearShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  uniform sampler2D uTexture;
+  uniform float value;
+  void main () { gl_FragColor = value * texture2D(uTexture, vUv); }
+`);
+
+/* Вброс (splat): добавляет гауссово пятно. uRadial=1 — радиальный
+   толчок скорости от точки, uRadial=0 — добавка вектора/цвета. */
+const splatShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uTarget;
+  uniform float aspectRatio;
+  uniform vec3 color;
+  uniform vec2 point;
+  uniform float radius;
+  uniform int uRadial;
+  void main () {
+    vec2 p = vUv - point.xy;
+    p.x *= aspectRatio;
+    float g = exp(-dot(p, p) / radius);
+    vec3 base = texture2D(uTarget, vUv).xyz;
+    vec3 add;
+    if (uRadial == 1) {
+      vec2 dir = p / max(length(p), 1e-4);
+      add = vec3(dir * color.x, 0.0) * g;
+    } else {
+      add = color * g;
+    }
+    gl_FragColor = vec4(base + add, 1.0);
+  }
+`);
+
+const advectionShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uVelocity;
+  uniform sampler2D uSource;
+  uniform vec2 texelSize;
+  uniform vec2 dyeTexelSize;
+  uniform float dt;
+  uniform float dissipation;
+  vec4 bilerp (sampler2D sam, vec2 uv, vec2 tsize) {
+    vec2 st = uv / tsize - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+    vec4 a = texture2D(sam, (iuv + vec2(0.5, 0.5)) * tsize);
+    vec4 b = texture2D(sam, (iuv + vec2(1.5, 0.5)) * tsize);
+    vec4 c = texture2D(sam, (iuv + vec2(0.5, 1.5)) * tsize);
+    vec4 d = texture2D(sam, (iuv + vec2(1.5, 1.5)) * tsize);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+  }
+  void main () {
+  #ifdef MANUAL_FILTERING
+    vec2 coord = vUv - dt * bilerp(uVelocity, vUv, texelSize).xy * texelSize;
+    vec4 result = bilerp(uSource, coord, dyeTexelSize);
+  #else
+    vec2 coord = vUv - dt * texture2D(uVelocity, vUv).xy * texelSize;
+    vec4 result = texture2D(uSource, coord);
+  #endif
+    float decay = 1.0 + dissipation * dt;
+    gl_FragColor = result / decay;
+  }
+`, ext.supportLinearFiltering ? null : ['MANUAL_FILTERING']);
+
+const divergenceShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  varying highp vec2 vL;
+  varying highp vec2 vR;
+  varying highp vec2 vT;
+  varying highp vec2 vB;
+  uniform sampler2D uVelocity;
+  void main () {
+    float L = texture2D(uVelocity, vL).x;
+    float R = texture2D(uVelocity, vR).x;
+    float T = texture2D(uVelocity, vT).y;
+    float B = texture2D(uVelocity, vB).y;
+    vec2 C = texture2D(uVelocity, vUv).xy;
+    if (vL.x < 0.0) { L = -C.x; }
+    if (vR.x > 1.0) { R = -C.x; }
+    if (vT.y > 1.0) { T = -C.y; }
+    if (vB.y < 0.0) { B = -C.y; }
+    float div = 0.5 * (R - L + T - B);
+    gl_FragColor = vec4(div, 0.0, 0.0, 1.0);
+  }
+`);
+
+const curlShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  varying highp vec2 vL;
+  varying highp vec2 vR;
+  varying highp vec2 vT;
+  varying highp vec2 vB;
+  uniform sampler2D uVelocity;
+  void main () {
+    float L = texture2D(uVelocity, vL).y;
+    float R = texture2D(uVelocity, vR).y;
+    float T = texture2D(uVelocity, vT).x;
+    float B = texture2D(uVelocity, vB).x;
+    float vorticity = R - L - T + B;
+    gl_FragColor = vec4(0.5 * vorticity, 0.0, 0.0, 1.0);
+  }
+`);
+
+const vorticityShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  varying vec2 vL;
+  varying vec2 vR;
+  varying vec2 vT;
+  varying vec2 vB;
+  uniform sampler2D uVelocity;
+  uniform sampler2D uCurl;
+  uniform float curl;
+  uniform float dt;
+  void main () {
+    float L = texture2D(uCurl, vL).x;
+    float R = texture2D(uCurl, vR).x;
+    float T = texture2D(uCurl, vT).x;
+    float B = texture2D(uCurl, vB).x;
+    float C = texture2D(uCurl, vUv).x;
+    vec2 force = 0.5 * vec2(abs(T) - abs(B), abs(R) - abs(L));
+    force /= length(force) + 0.0001;
+    force *= curl * C;
+    force.y *= -1.0;
+    vec2 velocity = texture2D(uVelocity, vUv).xy;
+    velocity += force * dt;
+    velocity = min(max(velocity, -1000.0), 1000.0);
+    gl_FragColor = vec4(velocity, 0.0, 1.0);
+  }
+`);
+
+const pressureShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  varying highp vec2 vL;
+  varying highp vec2 vR;
+  varying highp vec2 vT;
+  varying highp vec2 vB;
+  uniform sampler2D uPressure;
+  uniform sampler2D uDivergence;
+  void main () {
+    float L = texture2D(uPressure, vL).x;
+    float R = texture2D(uPressure, vR).x;
+    float T = texture2D(uPressure, vT).x;
+    float B = texture2D(uPressure, vB).x;
+    float divergence = texture2D(uDivergence, vUv).x;
+    float pressure = (L + R + B + T - divergence) * 0.25;
+    gl_FragColor = vec4(pressure, 0.0, 0.0, 1.0);
+  }
+`);
+
+const gradientSubtractShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision mediump float; precision mediump sampler2D;
+  varying highp vec2 vUv;
+  varying highp vec2 vL;
+  varying highp vec2 vR;
+  varying highp vec2 vT;
+  varying highp vec2 vB;
+  uniform sampler2D uPressure;
+  uniform sampler2D uVelocity;
+  void main () {
+    float L = texture2D(uPressure, vL).x;
+    float R = texture2D(uPressure, vR).x;
+    float T = texture2D(uPressure, vT).x;
+    float B = texture2D(uPressure, vB).x;
+    vec2 velocity = texture2D(uVelocity, vUv).xy;
+    velocity.xy -= vec2(R - L, T - B);
+    gl_FragColor = vec4(velocity, 0.0, 1.0);
+  }
+`);
+
+/* Явная диффузия красителя (закон Фика, явная схема). */
+const diffusionShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  varying vec2 vL;
+  varying vec2 vR;
+  varying vec2 vT;
+  varying vec2 vB;
+  uniform sampler2D uTexture;
+  uniform float diff;
+  void main () {
+    vec3 c = texture2D(uTexture, vUv).rgb;
+    vec3 sum = texture2D(uTexture, vL).rgb
+             + texture2D(uTexture, vR).rgb
+             + texture2D(uTexture, vT).rgb
+             + texture2D(uTexture, vB).rgb;
+    vec3 result = c + diff * (sum - 4.0 * c);
+    gl_FragColor = vec4(max(result, 0.0), 1.0);
+  }
+`);
+
+/* Волновое уравнение для высоты поверхности.
+   r — текущая высота, g — высота на предыдущем шаге. */
+const waveShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  varying vec2 vL;
+  varying vec2 vR;
+  varying vec2 vT;
+  varying vec2 vB;
+  uniform sampler2D uHeight;
+  uniform float damping;
+  void main () {
+    vec2 h = texture2D(uHeight, vUv).rg;
+    float sum = texture2D(uHeight, vL).r
+              + texture2D(uHeight, vR).r
+              + texture2D(uHeight, vT).r
+              + texture2D(uHeight, vB).r;
+    float next = (sum * 0.5 - h.g) * damping;
+    gl_FragColor = vec4(next, h.r, 0.0, 1.0);
+  }
+`);
+
+/* Отрисовка: высота даёт нормаль -> преломление, блики и тени;
+   краситель хранится как оптическая плотность (закон Бугера —
+   Ламберта — Бера), поэтому смешение субтрактивное, как у чернил. */
+const displayShader = compileShader(gl.FRAGMENT_SHADER, `
+  precision highp float; precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uDye;
+  uniform sampler2D uWave;
+  uniform vec2 waveTexel;
+  uniform float absorbScale;
+  void main () {
+    float hl = texture2D(uWave, vUv - vec2(waveTexel.x, 0.0)).r;
+    float hr = texture2D(uWave, vUv + vec2(waveTexel.x, 0.0)).r;
+    float hb = texture2D(uWave, vUv - vec2(0.0, waveTexel.y)).r;
+    float ht = texture2D(uWave, vUv + vec2(0.0, waveTexel.y)).r;
+    vec2 grad = vec2(hr - hl, ht - hb);
+
+    // преломление: смещаем выборку красителя по градиенту высоты
+    vec2 uv = clamp(vUv - grad * 0.30, 0.0, 1.0);
+    vec3 absorb = texture2D(uDye, uv).rgb;
+
+    vec3 waterColor = vec3(0.62, 0.76, 0.82);
+    vec3 col = waterColor * exp(-absorb * absorbScale);
+
+    // освещение поверхности
+    vec3 n = normalize(vec3(-grad.x * 14.0, -grad.y * 14.0, 1.0));
+    vec3 lightDir = normalize(vec3(-0.35, 0.45, 0.8));
+    float diffuse = clamp(dot(n, lightDir) * 0.5 + 0.5, 0.0, 1.0);
+    col *= 0.78 + 0.35 * diffuse;
+    vec3 refl = reflect(-lightDir, n);
+    float spec = pow(clamp(refl.z, 0.0, 1.0), 110.0);
+    col += spec * 0.38;
+
+    // лёгкая виньетка
+    vec2 d = vUv - 0.5;
+    col *= 1.0 - 0.35 * dot(d, d);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`);
+
+/* ---------- FBO ---------- */
+
+const blit = (() => {
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, -1, 1, 1, 1, 1, -1]), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(0);
+  return (target) => {
+    if (target == null) {
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    } else {
+      gl.viewport(0, 0, target.width, target.height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    }
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+  };
+})();
+
+function createFBO (w, h, internalFormat, format, type, filter) {
+  gl.activeTexture(gl.TEXTURE0);
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  gl.viewport(0, 0, w, h);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  return {
+    texture, fbo, width: w, height: h,
+    texelSizeX: 1 / w, texelSizeY: 1 / h,
+    attach (id) {
+      gl.activeTexture(gl.TEXTURE0 + id);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      return id;
+    }
+  };
+}
+
+function createDoubleFBO (w, h, internalFormat, format, type, filter) {
+  let fbo1 = createFBO(w, h, internalFormat, format, type, filter);
+  let fbo2 = createFBO(w, h, internalFormat, format, type, filter);
+  return {
+    width: w, height: h,
+    texelSizeX: 1 / w, texelSizeY: 1 / h,
+    get read () { return fbo1; },
+    set read (v) { fbo1 = v; },
+    get write () { return fbo2; },
+    set write (v) { fbo2 = v; },
+    swap () { const t = fbo1; fbo1 = fbo2; fbo2 = t; }
+  };
+}
+
+function getResolution (resolution) {
+  let aspect = gl.drawingBufferWidth / gl.drawingBufferHeight;
+  if (aspect < 1) aspect = 1 / aspect;
+  const min = Math.round(resolution);
+  const max = Math.round(resolution * aspect);
+  if (gl.drawingBufferWidth > gl.drawingBufferHeight)
+    return { width: max, height: min };
+  return { width: min, height: max };
+}
+
+/* ---------- Программы ---------- */
+
+const copyProgram        = createProgram(baseVertexShader, copyShader);
+const clearProgram       = createProgram(baseVertexShader, clearShader);
+const splatProgram       = createProgram(baseVertexShader, splatShader);
+const advectionProgram   = createProgram(baseVertexShader, advectionShader);
+const divergenceProgram  = createProgram(baseVertexShader, divergenceShader);
+const curlProgram        = createProgram(baseVertexShader, curlShader);
+const vorticityProgram   = createProgram(baseVertexShader, vorticityShader);
+const pressureProgram    = createProgram(baseVertexShader, pressureShader);
+const gradSubtractProgram= createProgram(baseVertexShader, gradientSubtractShader);
+const diffusionProgram   = createProgram(baseVertexShader, diffusionShader);
+const waveProgram        = createProgram(baseVertexShader, waveShader);
+const displayProgram     = createProgram(baseVertexShader, displayShader);
+
+/* ---------- Текстуры полей ---------- */
+
+let dye, velocity, wave, divergence, curl, pressure;
+
+function initFramebuffers () {
+  const simRes  = getResolution(config.SIM_RESOLUTION);
+  const dyeRes  = getResolution(config.DYE_RESOLUTION);
+  const waveRes = getResolution(config.WAVE_RESOLUTION);
+  const texType = ext.halfFloatTexType;
+  const rgba = ext.formatRGBA;
+  const rg   = ext.formatRG;
+  const r    = ext.formatR;
+  const filtering = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
+  gl.disable(gl.BLEND);
+
+  dye      = createDoubleFBO(dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
+  velocity = createDoubleFBO(simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
+  wave     = createDoubleFBO(waveRes.width, waveRes.height, rg.internalFormat, rg.format, texType, filtering);
+  divergence = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+  curl       = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+  pressure   = createDoubleFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+}
+
+function resizeCanvas () {
+  const w = Math.max(1, Math.floor(stage.clientWidth * (window.devicePixelRatio || 1)));
+  const h = Math.max(1, Math.floor(stage.clientHeight * (window.devicePixelRatio || 1)));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    return true;
+  }
+  return false;
+}
+
+resizeCanvas();
+initFramebuffers();
+
+/* ---------- Вбросы ---------- */
+
+function correctRadius (radius) {
+  const aspect = canvas.width / canvas.height;
+  if (aspect > 1) radius *= aspect;
+  return radius;
+}
+
+function splat (target, x, y, r, g, b, radius, radial) {
+  splatProgram.bind();
+  gl.uniform1i(splatProgram.uniforms.uTarget, target.read.attach(0));
+  gl.uniform1f(splatProgram.uniforms.aspectRatio, canvas.width / canvas.height);
+  gl.uniform2f(splatProgram.uniforms.point, x, y);
+  gl.uniform3f(splatProgram.uniforms.color, r, g, b);
+  gl.uniform1f(splatProgram.uniforms.radius, correctRadius(radius));
+  gl.uniform1i(splatProgram.uniforms.uRadial, radial ? 1 : 0);
+  blit(target.write);
+  target.swap();
+}
+
+/* Касание твёрдым телом: радиальный толчок воды + круги. */
+function touchWater (x, y, strength) {
+  splat(velocity, x, y, config.TOUCH_FORCE * strength, 0, 0, 0.0018, true);
+  splat(wave, x, y, -1.4 * strength, 0, 0, 0.002, false);
+}
+
+/* Ведение курсором по воде (тянем тело по поверхности). */
+function dragWater (x, y, dx, dy) {
+  splat(velocity, x, y, dx * config.DRAG_FORCE, dy * config.DRAG_FORCE, 0, 0.0014, false);
+  splat(wave, x, y, -0.30, 0, 0, 0.0012, false);
+}
+
+/* Падение капли: краситель + всплеск + волна. Объём в «мл». */
+function dropIntoWater (x, y, colorRgb, volume) {
+  const k = Math.cbrt(volume);              // линейный масштаб капли
+  const radius = 0.0011 * k;                // площадь пятна ~ объёму^(2/3)
+  const intensity = 0.55 * k;               // концентрация в пятне
+  // оптическая плотность: чем темнее канал цвета капли, тем сильнее
+  // он поглощается — субтрактивное смешение, как у настоящего красителя
+  const ar = (1.06 - colorRgb.r) * intensity;
+  const ag = (1.06 - colorRgb.g) * intensity;
+  const ab = (1.06 - colorRgb.b) * intensity;
+  splat(dye, x, y, ar, ag, ab, radius);
+  splat(velocity, x, y, config.TOUCH_FORCE * (0.6 + 0.25 * k), 0, 0, radius * 1.4, true);
+  splat(wave, x, y, -0.45 * k, 0, 0, Math.max(radius * 0.7, 0.0015), false);
+}
+
+/* ---------- Шаг симуляции ---------- */
+
+function step (dt) {
+  gl.disable(gl.BLEND);
+
+  // завихренность
+  curlProgram.bind();
+  gl.uniform2f(curlProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  gl.uniform1i(curlProgram.uniforms.uVelocity, velocity.read.attach(0));
+  blit(curl);
+
+  vorticityProgram.bind();
+  gl.uniform2f(vorticityProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  gl.uniform1i(vorticityProgram.uniforms.uVelocity, velocity.read.attach(0));
+  gl.uniform1i(vorticityProgram.uniforms.uCurl, curl.attach(1));
+  gl.uniform1f(vorticityProgram.uniforms.curl, config.CURL);
+  gl.uniform1f(vorticityProgram.uniforms.dt, dt);
+  blit(velocity.write);
+  velocity.swap();
+
+  // дивергенция и проекция давления (несжимаемость)
+  divergenceProgram.bind();
+  gl.uniform2f(divergenceProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  gl.uniform1i(divergenceProgram.uniforms.uVelocity, velocity.read.attach(0));
+  blit(divergence);
+
+  clearProgram.bind();
+  gl.uniform1i(clearProgram.uniforms.uTexture, pressure.read.attach(0));
+  gl.uniform1f(clearProgram.uniforms.value, config.PRESSURE);
+  blit(pressure.write);
+  pressure.swap();
+
+  pressureProgram.bind();
+  gl.uniform2f(pressureProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  gl.uniform1i(pressureProgram.uniforms.uDivergence, divergence.attach(0));
+  for (let i = 0; i < config.PRESSURE_ITERATIONS; i++) {
+    gl.uniform1i(pressureProgram.uniforms.uPressure, pressure.read.attach(1));
+    blit(pressure.write);
+    pressure.swap();
+  }
+
+  gradSubtractProgram.bind();
+  gl.uniform2f(gradSubtractProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  gl.uniform1i(gradSubtractProgram.uniforms.uPressure, pressure.read.attach(0));
+  gl.uniform1i(gradSubtractProgram.uniforms.uVelocity, velocity.read.attach(1));
+  blit(velocity.write);
+  velocity.swap();
+
+  // адвекция скорости (вязкость — как затухание импульса)
+  advectionProgram.bind();
+  gl.uniform2f(advectionProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
+  if (!ext.supportLinearFiltering)
+    gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, velocity.texelSizeX, velocity.texelSizeY);
+  const velId = velocity.read.attach(0);
+  gl.uniform1i(advectionProgram.uniforms.uVelocity, velId);
+  gl.uniform1i(advectionProgram.uniforms.uSource, velId);
+  gl.uniform1f(advectionProgram.uniforms.dt, dt);
+  gl.uniform1f(advectionProgram.uniforms.dissipation, config.VELOCITY_DISSIPATION);
+  blit(velocity.write);
+  velocity.swap();
+
+  // адвекция красителя (без распада — краситель не исчезает)
+  if (!ext.supportLinearFiltering)
+    gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, dye.texelSizeX, dye.texelSizeY);
+  gl.uniform1i(advectionProgram.uniforms.uVelocity, velocity.read.attach(0));
+  gl.uniform1i(advectionProgram.uniforms.uSource, dye.read.attach(1));
+  gl.uniform1f(advectionProgram.uniforms.dissipation, 0.0);
+  blit(dye.write);
+  dye.swap();
+
+  // диффузия красителя
+  if (config.DYE_DIFFUSION > 0.0001) {
+    diffusionProgram.bind();
+    gl.uniform2f(diffusionProgram.uniforms.texelSize, dye.texelSizeX, dye.texelSizeY);
+    gl.uniform1f(diffusionProgram.uniforms.diff, config.DYE_DIFFUSION);
+    gl.uniform1i(diffusionProgram.uniforms.uTexture, dye.read.attach(0));
+    blit(dye.write);
+    dye.swap();
+  }
+
+  // волны на поверхности (два подшага для скорости распространения)
+  waveProgram.bind();
+  gl.uniform2f(waveProgram.uniforms.texelSize, wave.texelSizeX, wave.texelSizeY);
+  gl.uniform1f(waveProgram.uniforms.damping, config.WAVE_DAMPING);
+  for (let i = 0; i < 2; i++) {
+    gl.uniform1i(waveProgram.uniforms.uHeight, wave.read.attach(0));
+    blit(wave.write);
+    wave.swap();
+  }
+}
+
+function render () {
+  displayProgram.bind();
+  gl.uniform1i(displayProgram.uniforms.uDye, dye.read.attach(0));
+  gl.uniform1i(displayProgram.uniforms.uWave, wave.read.attach(1));
+  gl.uniform2f(displayProgram.uniforms.waveTexel, wave.texelSizeX, wave.texelSizeY);
+  gl.uniform1f(displayProgram.uniforms.absorbScale, config.ABSORB_SCALE);
+  blit(null);
+}
+
+/* ---------- Указатель ---------- */
+
+const pointer = { down: false, moved: false, x: 0, y: 0, dx: 0, dy: 0 };
+
+function updatePointer (e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = 1 - (e.clientY - rect.top) / rect.height;
+  pointer.dx = x - pointer.x;
+  pointer.dy = y - pointer.y;
+  pointer.x = x;
+  pointer.y = y;
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  updatePointer(e);
+  pointer.dx = 0; pointer.dy = 0;
+  pointer.down = true;
+  if (state.mode === 'drop') {
+    animateDrop(e.clientX, e.clientY, state.dropColor, state.dropVolume);
+  } else {
+    touchWater(pointer.x, pointer.y, 1.0);
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  if (!pointer.down) return;
+  updatePointer(e);
+  if (state.mode === 'touch' && (Math.abs(pointer.dx) > 0 || Math.abs(pointer.dy) > 0))
+    pointer.moved = true;
+});
+
+window.addEventListener('pointerup', () => { pointer.down = false; });
+
+function applyPointer () {
+  if (pointer.moved) {
+    pointer.moved = false;
+    const aspect = canvas.width / canvas.height;
+    dragWater(pointer.x, pointer.y, pointer.dx * aspect, pointer.dy);
+  }
+}
+
+/* ---------- Анимация падающей капли ---------- */
+
+function animateDrop (clientX, clientY, colorRgb, volume) {
+  const rect = canvas.getBoundingClientRect();
+  const stageRect = stage.getBoundingClientRect();
+  const size = Math.max(8, Math.round(5 * Math.cbrt(volume)));
+  const el = document.createElement('div');
+  el.className = 'falling-drop';
+  el.style.width = size + 'px';
+  el.style.height = Math.round(size * 1.25) + 'px';
+  el.style.background = rgbToCss(colorRgb);
+  el.style.left = (clientX - stageRect.left - size / 2) + 'px';
+  el.style.top = (-size * 2) + 'px';
+  stage.appendChild(el);
+
+  const fallDist = (clientY - stageRect.top) + size * 2;
+  const anim = el.animate(
+    [{ transform: 'translateY(0)' }, { transform: `translateY(${fallDist}px)` }],
+    { duration: Math.min(650, 240 + fallDist * 0.45), easing: 'cubic-bezier(.45,.02,.85,.5)' }
+  );
+  anim.onfinish = () => {
+    el.remove();
+    const x = (clientX - rect.left) / rect.width;
+    const y = 1 - (clientY - rect.top) / rect.height;
+    dropIntoWater(
+      Math.min(Math.max(x, 0), 1),
+      Math.min(Math.max(y, 0), 1),
+      colorRgb, volume
+    );
+  };
+}
+
+/* ---------- Главный цикл ---------- */
+
+let lastTime = performance.now();
+
+function frame (now) {
+  let dt = (now - lastTime) / 1000;
+  dt = Math.min(dt, 0.016666);
+  lastTime = now;
+
+  if (resizeCanvas()) initFramebuffers();
+  applyPointer();
+  step(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- Панель управления ---------- */
+
+function hexToRgb (hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+function rgbToCss (c) {
+  return `rgb(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)})`;
+}
+
+const modeTouchBtn = document.getElementById('modeTouch');
+const modeDropBtn = document.getElementById('modeDrop');
+const modeHint = document.getElementById('modeHint');
+
+function setMode (mode) {
+  state.mode = mode;
+  modeTouchBtn.classList.toggle('active', mode === 'touch');
+  modeDropBtn.classList.toggle('active', mode === 'drop');
+  modeHint.textContent = mode === 'touch'
+    ? 'Нажмите или проведите по воде — поверхность отреагирует волнами и течением.'
+    : 'Кликните по воде — капля выбранного цвета и объёма упадёт в эту точку.';
+}
+modeTouchBtn.addEventListener('click', () => setMode('touch'));
+modeDropBtn.addEventListener('click', () => setMode('drop'));
+
+const dropColorInput = document.getElementById('dropColor');
+dropColorInput.addEventListener('input', () => { state.dropColor = hexToRgb(dropColorInput.value); });
+
+const presetColors = ['#d4143c', '#f07818', '#f5c211', '#1ca832', '#12b5b0', '#1f57d6', '#7a25c9', '#d6219c', '#1b1f24'];
+const swatches = document.getElementById('swatches');
+presetColors.forEach(hex => {
+  const b = document.createElement('button');
+  b.style.background = hex;
+  b.title = hex;
+  b.addEventListener('click', () => {
+    dropColorInput.value = hex;
+    state.dropColor = hexToRgb(hex);
+  });
+  swatches.appendChild(b);
+});
+
+const volumeInput = document.getElementById('dropVolume');
+const volumeOut = document.getElementById('volumeOut');
+volumeInput.addEventListener('input', () => {
+  state.dropVolume = +volumeInput.value;
+  volumeOut.textContent = volumeInput.value + ' мл';
+});
+
+document.getElementById('dropRandom').addEventListener('click', () => {
+  const rect = canvas.getBoundingClientRect();
+  const x = rect.left + rect.width * (0.15 + Math.random() * 0.7);
+  const y = rect.top + rect.height * (0.15 + Math.random() * 0.7);
+  animateDrop(x, y, state.dropColor, state.dropVolume);
+});
+
+const viscosityInput = document.getElementById('viscosity');
+const viscosityOut = document.getElementById('viscosityOut');
+viscosityInput.addEventListener('input', () => {
+  viscosityOut.textContent = viscosityInput.value;
+  // 0 -> почти невязкая вода, 100 -> сироп
+  config.VELOCITY_DISSIPATION = 0.08 + (viscosityInput.value / 100) * 4.0;
+});
+viscosityInput.dispatchEvent(new Event('input'));
+
+const diffusionInput = document.getElementById('diffusion');
+const diffusionOut = document.getElementById('diffusionOut');
+diffusionInput.addEventListener('input', () => {
+  diffusionOut.textContent = diffusionInput.value;
+  config.DYE_DIFFUSION = (diffusionInput.value / 100) * 0.15;
+});
+diffusionInput.dispatchEvent(new Event('input'));
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  initFramebuffers();
+});
+</script>
+</body>
+</html>
