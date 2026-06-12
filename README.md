@@ -8,6 +8,8 @@
 ![Симуляция](https://img.shields.io/badge/WebGL-GPU%20simulation-2f9ec7)
 ![Один файл](https://img.shields.io/badge/dependencies-0-success)
 
+**▶️ Попробовать онлайн: https://imkgolang.github.io/water-drops/**
+
 ## 🚀 Запуск
 
 Просто откройте `index.html` в любом современном браузере (двойной клик).
